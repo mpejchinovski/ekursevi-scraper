@@ -76,7 +76,6 @@ async function downloadFiles(browser, page, files, dpath, link) {
     await page._client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dpath });
 
     for (let file of files) {
-        let fileName;
         await page.click(`a[href="${file.link}"]`);
         await checkIfDownloaded(fileToDownload, dpath);
         await page.goto(link);
