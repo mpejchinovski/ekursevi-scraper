@@ -27,7 +27,7 @@ async function checkIfDownloaded(file, dpath) {
     console.log('File downloaded: ' + file);
 }
 
-const downloadPath = '/home/martin/scraper/downloads';
+const downloadPath = '/home/martin/ekursevi_scraper/downloads';
 
 async function downloadFilesInFolders(browser, page, dpath) {
     let found, fileName;
@@ -50,9 +50,24 @@ async function downloadFilesInFolders(browser, page, dpath) {
     }
 }
             
-async function downloadFiles(browser, page, files, dpath, link) {
-    let fileToDownload; 
+async function downloadFiles(files, currentSubject, dpath, cookieValue) {
+    let fileToDownload;
+    let resolvedPath = path.resolve(dpath, currentSubject.name);
+    const cookie = {
+        name: "MoodleSession",
+        value: cookieValue
+    };
+    const browser = await puppeteer.launch({ headless: false, args: ['--unlimited-storage', '--force-memory-crash-report', '--no-sandbox'] });
+    const page = await browser.newPage();
+  
+    let currentFile;
+    await page.goto(currentSubject.link);
+    await page.setCookie(cookie);
+    await page.goto(currentSubject.link);
+   
     const client = await page.target().createCDPSession();
+    client.send ("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: "/home/martin/Desktop" });
+
     await client.send('Network.enable');
     await client.send('Network.setRequestInterception', {
 		    patterns: [{ urlPattern: '*.pdf', interceptionStage: 'HeadersReceived' }]
@@ -64,8 +79,9 @@ async function downloadFiles(browser, page, files, dpath, link) {
         let newHeaders = responseHeaders;
         newHeaders['Content-Disposition'] = newHeaders['Content-Disposition'].replace('inline', 'attachment');
         
-        console.log(responseHeaders['Content-Length']); 
-             
+        console.log(responseHeaders['Content-Length']);     
+        console.log(responseHeaders);
+
         fileToDownload = newHeaders['Content-Disposition'].replace('attachment; filename="', '').replace('"', '');
             client.send('Network.continueInterceptedRequest', {
 			    interceptionId,
@@ -73,12 +89,20 @@ async function downloadFiles(browser, page, files, dpath, link) {
             });
         });
 
-    await page._client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dpath });
 
+    console.log(fileToDownload, "taka");
+
+//    page.on('error', async err => {                   
+//        await page.goto(currentSubject.link);
+//        await page.click(`a[href="${currentFile.link}"]`);
+//        await checkIfDownloaded(fileToDownload, resolvedPath);
+//    });
+    
     for (let file of files) {
+        currentFile = file;
         await page.click(`a[href="${file.link}"]`);
-        await checkIfDownloaded(fileToDownload, dpath);
-        await page.goto(link);
+        await checkIfDownloaded(fileToDownload, resolvedPath);
+        await page.goto(currentSubject.link);
     }
 }
 
@@ -87,14 +111,23 @@ async function fetchResources(currentSubject, cookieValue) {
         name: 'MoodleSession',
         value: cookieValue
     };
-    const browser = await puppeteer.launch({ headless: true });
-    const page = await browser.newPage();
-    
+    let browser = await puppeteer.launch({ headless: false });
+    let page = await browser.newPage();
+
+    let finished = false;
+
     let subjectPath = path.resolve(downloadPath, currentSubject.name);
     fs.mkdirSync(subjectPath, { recursive: true });
     let subjectFolders = null, subjectFiles = null;
 
-    await page.goto(currentSubject.link, { waitUntil: 'networkidle0' });
+    page.on('error', async err => {
+        if (finished) 
+            console.log('dobro e');
+        else 
+            await page.goto(currentSubject.link);
+    });
+
+    await page.goto(currentSubject.link);
     await page.setCookie(cookie);
     await page.goto(currentSubject.link);
 
@@ -116,12 +149,14 @@ async function fetchResources(currentSubject, cookieValue) {
             name: element.querySelector('.instancename').textContent.replace('Folder', '').trim(),
             link: element.href
     })))}
+
+    finished = true;
     
-   /* subjectFiles ? console.log(`${subjectFiles.length} files outside of a folder found`,
+    subjectFiles ? console.log(`${subjectFiles.length} files outside of a folder found`,
     subjectFiles.map(element => element.name)) : console.log('0 files found');
     subjectFolders ? console.log(`${subjectFolders.length} folders found`,
     subjectFolders.map(element => element.name)) : console.log('0 folders found');
-*/  
+    
     return {
         subjectFiles,
         subjectFolders
@@ -148,4 +183,4 @@ async function fetchSubjects(cookieValue) {
     return subjects;
 }
 
-module.exports = { fetchSubjects, fetchResources };
+module.exports = { fetchSubjects, fetchResources, downloadFiles };

@@ -4,7 +4,7 @@ port = 5000,
 bodyParser = require('body-parser'),
 cors = require('cors');
 
-const { fetchSubjects, fetchResources }  = require('../scraper/scraper.js');
+const { fetchSubjects, fetchResources, downloadFiles }  = require('../scraper/scraper.js');
 
 app.listen(port, () => console.log('Server listening on port ' + port));
 
@@ -23,5 +23,9 @@ app.post('/resources', async (req, res) => {
     res.send(response);
 });
 
+app.post('/resources/download/files', async (req, res) => {
+    const response = await downloadFiles(req.body.files, req.body.currentSubject, req.body.dpath, req.body.cookie);
+    res.send(response);
+});
 
 

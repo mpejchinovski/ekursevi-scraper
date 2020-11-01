@@ -11,11 +11,23 @@ function App() {
     const fetchSubjects = async () => {
         const subjectsResponse = await axios.post("http://localhost:5000/subjects", { cookie });
         setSubjects(subjectsResponse.data);
+        console.log(subjectsResponse.data);
     }
 
     const fetchResources = async () => {
         const resourcesResponse = await axios.post("http://localhost:5000/resources", { currentSubject, cookie });
         setResources(resourcesResponse.data);
+        console.log(resourcesResponse.data);
+    }
+
+    const downloadFiles = async () => {
+        let response = await axios.post("http://localhost:5000/resources/download/files", {
+            files: resources.subjectFiles,
+            currentSubject,
+            dpath: "/home/martin/ekursevi_scraper/downloads",
+            cookie
+        });
+        console.log(response.data);
     }
 
     return (
@@ -39,6 +51,8 @@ function App() {
             {resources && resources.subjectFiles ? <ul> Files {resources.subjectFiles.map(element => <li> {element.name} </li>)} </ul> : null}
 
             {resources && resources.subjectFolders ? <ul> Folders {resources.subjectFolders.map(element => <li> {element.name} </li>)} </ul> : null}
+
+	    {resources ? <button onClick={downloadFiles}> Download </button> : null}
         </div>
     );
 }
