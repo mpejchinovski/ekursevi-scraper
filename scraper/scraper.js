@@ -1,12 +1,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
-const util = require('util');
-const readline = require('readline');
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+const https = require('https');
 
 async function checkIfDownloaded(file, dpath) {
     let fileName;
@@ -25,9 +20,10 @@ async function checkIfDownloaded(file, dpath) {
                         });
                     }
     console.log('File downloaded: ' + file);
+    return fileName;
 }
 
-const downloadPath = '/home/martin/ekursevi_scraper/downloads';
+const downloadPath = path.resolve(process.cwd(), "downloads");
 
 async function downloadFilesInFolders(browser, page, dpath) {
     let found, fileName;
@@ -49,61 +45,64 @@ async function downloadFilesInFolders(browser, page, dpath) {
         await checkIfDownloaded(file.name, dpath);
     }
 }
-            
-async function downloadFiles(files, currentSubject, dpath, cookieValue) {
-    let fileToDownload;
-    let resolvedPath = path.resolve(dpath, currentSubject.name);
+
+async function download(url, filename, subjectPath, cookie) {
+    url = url.replace("https://", "");
+    let options = {
+        hostname: url.substring(0, url.indexOf("/")),
+        path: url.substring(url.indexOf("/"), url.length),
+        port: 443,
+        headers: {
+            "Cookie": `MoodleSession=${cookie}`
+        }
+    }
+
+    return new Promise((resolve, reject) => {
+        https.get(options, res => {
+            res.on('data', chunk => {
+                fs.appendFile(path.resolve(subjectPath, filename), Buffer.from(chunk), err => {
+                    if (err) throw (err);
+                    else return chunk.length; 
+                });
+            });
+
+            res.on('end', () => {
+                resolve();
+            });
+        });
+    })
+
+}
+
+async function downloadFiles(files, subject, dpath, cookieValue) {
+    let subjectPath = path.resolve(dpath, subject.name);
+    let alreadyDownloaded = fs.readdirSync(subjectPath);
+    console.log(alreadyDownloaded);
+    
+    files = files.filter(file => alreadyDownloaded.indexOf(file.name) == -1);
+    
     const cookie = {
         name: "MoodleSession",
         value: cookieValue
     };
-    const browser = await puppeteer.launch({ headless: false, args: ['--unlimited-storage', '--force-memory-crash-report', '--no-sandbox'] });
+
+    const browser = await puppeteer.launch({ headless: true, args: ['--unlimited-storage', '--no-sandbox'] });
     const page = await browser.newPage();
   
-    let currentFile;
-    await page.goto(currentSubject.link);
+    await page.goto(subject.link);
     await page.setCookie(cookie);
-    await page.goto(currentSubject.link);
-   
-    const client = await page.target().createCDPSession();
-    client.send ("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: "/home/martin/Desktop" });
+    await page.goto(subject.link); 
 
-    await client.send('Network.enable');
-    await client.send('Network.setRequestInterception', {
-		    patterns: [{ urlPattern: '*.pdf', interceptionStage: 'HeadersReceived' }]
-        });
-    
-    client.on('Network.requestIntercepted', async ({ interceptionId, request, responseHeaders, resourceType }) => {
-        const response = await client.send('Network.getResponseBodyForInterception', { interceptionId });
-           
-        let newHeaders = responseHeaders;
-        newHeaders['Content-Disposition'] = newHeaders['Content-Disposition'].replace('inline', 'attachment');
-        
-        console.log(responseHeaders['Content-Length']);     
-        console.log(responseHeaders);
-
-        fileToDownload = newHeaders['Content-Disposition'].replace('attachment; filename="', '').replace('"', '');
-            client.send('Network.continueInterceptedRequest', {
-			    interceptionId,
-                headers: newHeaders
-            });
-        });
-
-
-    console.log(fileToDownload, "taka");
-
-//    page.on('error', async err => {                   
-//        await page.goto(currentSubject.link);
-//        await page.click(`a[href="${currentFile.link}"]`);
-//        await checkIfDownloaded(fileToDownload, resolvedPath);
-//    });
-    
     for (let file of files) {
-        currentFile = file;
         await page.click(`a[href="${file.link}"]`);
-        await checkIfDownloaded(fileToDownload, resolvedPath);
-        await page.goto(currentSubject.link);
+        console.log(file.link);
+
+        await download(page.url(), file.name, subjectPath, cookieValue);
+        await checkIfDownloaded(file.name, subjectPath);
+        await page.goto(subject.link);
     }
+
+    await browser.close();
 }
 
 async function fetchResources(currentSubject, cookieValue) {
@@ -111,7 +110,8 @@ async function fetchResources(currentSubject, cookieValue) {
         name: 'MoodleSession',
         value: cookieValue
     };
-    let browser = await puppeteer.launch({ headless: false });
+
+    let browser = await puppeteer.launch({ headless: false, args: ['--no-sandbox'] });
     let page = await browser.newPage();
 
     let finished = false;
@@ -119,13 +119,6 @@ async function fetchResources(currentSubject, cookieValue) {
     let subjectPath = path.resolve(downloadPath, currentSubject.name);
     fs.mkdirSync(subjectPath, { recursive: true });
     let subjectFolders = null, subjectFiles = null;
-
-    page.on('error', async err => {
-        if (finished) 
-            console.log('dobro e');
-        else 
-            await page.goto(currentSubject.link);
-    });
 
     await page.goto(currentSubject.link);
     await page.setCookie(cookie);
@@ -154,9 +147,12 @@ async function fetchResources(currentSubject, cookieValue) {
     
     subjectFiles ? console.log(`${subjectFiles.length} files outside of a folder found`,
     subjectFiles.map(element => element.name)) : console.log('0 files found');
+    
     subjectFolders ? console.log(`${subjectFolders.length} folders found`,
     subjectFolders.map(element => element.name)) : console.log('0 folders found');
     
+    await browser.close();
+
     return {
         subjectFiles,
         subjectFolders
@@ -170,9 +166,12 @@ async function fetchSubjects(cookieValue) {
     };
 
     const url = 'https://e-kursevi.feit.ukim.edu.mk/my/';
+    
     const browser = await puppeteer.launch({
-        headless: true, 
+        headless: true,
+        args: ['--no-sandbox']
         });
+
     const page = await browser.newPage();
     await page.goto(url);
     await page.setCookie(cookie);
